@@ -1,0 +1,311 @@
+import subprocess
+import re
+import time
+import os
+
+
+
+
+
+def bloquear_conexion_adaptador_principal2(ip_destino, gateway_wot):
+    """Bloquea la conexión del adaptador principal hacia la IP de destino de WOT."""
+    try:
+        # Eliminar cualquier ruta existente hacia la IP de destino
+        cmd_delete = f'route delete {ip_destino}'
+        subprocess.run(cmd_delete, shell=True, check=True)
+        print(f"✅ Ruta hacia {ip_destino} eliminada del adaptador principal.")
+
+        # Agregar una ruta específica para redirigir el tráfico hacia el adaptador de WOT
+        cmd_add = f'route add {ip_destino} MASK 255.255.0.0 {gateway_wot} METRIC 50'
+        subprocess.run(cmd_add, shell=True, check=True)
+        print(f"✅ Ruta hacia {ip_destino} agregada a través del adaptador de WOT.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error al modificar rutas: {e}")
+
+def obtener_detalles_adaptador(nombre):
+    """Obtiene IP, Gateway y Máscara de un adaptador específico."""
+    try:
+        cmd = f'netsh interface ipv4 show addresses "{nombre}"'
+        result = subprocess.run(cmd, capture_output=True, text=True, shell=True, encoding='utf-8', errors='replace')
+
+        # Modificación: Captura tanto "Dirección IP" como "IP"
+        ip_match = re.search(r"(?i)(?:Direcci[oó]n IP|IP)\s*:\s*([\d.]+)", result.stdout)
+        ip = ip_match.group(1) if ip_match else None
+
+        gateway_match = re.search(r"Puerta de enlace predeterminada\s*:\s*([\d.]+)", result.stdout)
+        if not gateway_match:
+            gateway_match = re.search(r"Puerta de enlace\s*:\s*([\d.]+)", result.stdout)
+        if not gateway_match:
+            gateway_match = re.search(r"Gateway\s*:\s*([\d.]+)", result.stdout)
+        gateway = gateway_match.group(1) if gateway_match else None
+
+        mask_match = re.search(r"m.?scara\s+([\d.]+)", result.stdout)
+        mascara = mask_match.group(1) if mask_match else "255.255.255.0"
+
+        return ip, gateway, mascara
+    except Exception as e:
+        print(f"⚠️ Error al obtener detalles para {nombre}: {str(e)}")
+        return None, None, None
+
+
+
+def obtener_adaptadores():
+    """Obtiene los adaptadores de red usando netsh."""
+    adaptadores = []
+    print("\n🔹 Detectando adaptadores de red...")
+
+    try:
+        cmd = "netsh interface ipv4 show interfaces"
+        result = subprocess.run(cmd, capture_output=True, text=True, shell=True, encoding='utf-8', errors='replace')
+        for line in result.stdout.splitlines():
+            match = re.match(r"^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\w+)\s+(.+)", line)
+            if match:
+                idx = match.group(1)
+                estado = "✅ Conectado" if match.group(4) == "connected" else "❌ Sin conexión"
+                nombre = match.group(5).strip()
+                ip, gateway, mascara = obtener_detalles_adaptador(nombre)
+                info = f"  [{len(adaptadores) + 1}] {nombre} - {estado}"
+                if gateway:
+                    info += f" | Gateway: {gateway}"
+                if ip:
+                    info += f" | IP: {ip}"
+                else:
+                    info += " | IP: None"
+                adaptadores.append((idx, nombre, ip, gateway, mascara))
+                print(info)
+        return adaptadores
+    except Exception as e:
+        print(f"❌ Error al obtener adaptadores: {e}")
+        return []
+
+
+def resetear_a_dhcp(nombre):
+    """Resetea el adaptador a DHCP borrando IP fija y DNS configurados."""
+    try:
+        cmd_ip = f'netsh interface ip set address name="{nombre}" dhcp'
+        subprocess.run(cmd_ip, shell=True, check=True)
+        cmd_dns = f'netsh interface ip set dns name="{nombre}" dhcp'
+        subprocess.run(cmd_dns, shell=True, check=True)
+        print(f"✅ {nombre} se ha reseteado a DHCP.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error al resetear {nombre} a DHCP: {e}")
+
+
+def configurar_ip_estatica(nombre, ip_estatica, mascara, gateway, dns):
+    """
+    Configura el adaptador con una IP estática, máscara, gateway y DNS.
+    Se usa la métrica 50 para que el adaptador no sea tomado como principal para el tráfico general.
+    Ejecuta:
+      netsh interface ip set address name="{nombre}" static {ip_estatica} {mascara} {gateway} 50
+      netsh interface ip set dns name="{nombre}" static {dns} primary
+    """
+    try:
+        cmd_ip = f'netsh interface ip set address name="{nombre}" static {ip_estatica} {mascara} {gateway} 50'
+        subprocess.run(cmd_ip, shell=True, check=True)
+        print(f"✅ Se asignó IP estática {ip_estatica} con máscara {mascara} y gateway {gateway} en {nombre}")
+
+        cmd_dns = f'netsh interface ip set dns name="{nombre}" static {dns} primary'
+        subprocess.run(cmd_dns, shell=True, check=True)
+        print(f"✅ Se asignó DNS {dns} en {nombre}")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error al configurar IP estática en {nombre}: {e}")
+
+
+def asignar_metrica(nombre, metric):
+    """Asigna una métrica específica al adaptador."""
+    try:
+        cmd = f'netsh interface ipv4 set interface name="{nombre}" metric={metric}'
+        subprocess.run(cmd, shell=True, check=True)
+        print(f"✅ Se asignó la métrica {metric} a {nombre}")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error al asignar la métrica en {nombre}: {e}")
+
+
+def eliminar_ruta(network_target):
+    """Elimina cualquier ruta existente para el destino especificado."""
+    try:
+        cmd = f'route delete {network_target}'
+        subprocess.run(cmd, shell=True, check=True)
+        print(f"✅ Ruta {network_target} eliminada.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error al eliminar ruta {network_target}: {e}")
+
+
+def modificar_ruta(accion, gateway, network_target):
+    """Modifica la ruta específica para World of Tanks de forma persistente."""
+    # Usar el parámetro -p para hacerla persistente
+    if accion.lower() == 'add':
+        comando = f'route -p add {network_target} MASK 255.255.0.0 {gateway} METRIC 50'
+    elif accion.lower() == 'delete':
+        comando = f'route -p delete {network_target}'
+    else:
+        print("Acción no válida")
+        return
+    subprocess.run(comando, shell=True, check=True)
+
+
+
+def verificar_proceso(proceso):
+    cmd = f'tasklist /FI "IMAGENAME eq {proceso}"'
+    result = subprocess.run(cmd, capture_output=True, text=True, shell=True, encoding='utf-8', errors='replace')
+    return proceso.lower() in result.stdout.lower()
+
+
+
+# Definir los colores para la consola
+ROJO = '\033[91m'
+VERDE = '\033[92m'
+AMARILLO = '\033[93m'
+RESET = '\033[0m'
+
+def obtener_ip_local_conectada(puerto, ip_excluir):
+    """Obtiene la IP local conectada al servidor de WOT en el puerto especificado, excluyendo una IP no deseada."""
+    try:
+        cmd = f'netstat -n | findstr :{puerto} | findstr /V "{ip_excluir}"'
+        result = subprocess.run(cmd, capture_output=True, text=True, shell=True, encoding='utf-8', errors='replace')
+
+        for line in result.stdout.splitlines():
+            if 'ESTABLISHED' in line:
+                ip_local = line.split()[1].split(':')[0]  # Extraer IP local de la conexión
+                return ip_local
+        return None
+    except Exception as e:
+        print(f"⚠️ Error al obtener la IP local conectada: {str(e)}")
+        return None
+
+def monitorear_conexion(gateway_wot, ip_wot, ip_excluir):
+    """Monitorea la conexión asegurando que se use la IP correcta para WOT y excluyendo la IP incorrecta."""
+    try:
+        while True:
+            # Limpiar la consola
+            os.system('cls' if os.name == 'nt' else 'clear')
+
+            ip_local = obtener_ip_local_conectada(5222, ip_excluir)
+            if ip_local:
+                print(f"🔍 IP local conectada al servidor de WOT: {ip_local}")
+                print(f"🔍 IP Red sin Microcortes! (la que deberías usar) {ip_wot}")
+
+                if ip_local == ip_wot:
+                    print(f"{VERDE}✅ WOT está conectado correctamente con la IP adecuada.{RESET}")
+                else:
+                    print(f"{ROJO}⚠️ Advertencia: WOT está usando otra IP ({ip_local}).{RESET}")
+            else:
+                print(f"{AMARILLO}⚠️ No se encontró una conexión activa en el puerto 5222.{RESET}")
+
+            time.sleep(5)
+    except KeyboardInterrupt:
+        print("\n🔧 Monitoreo detenido manualmente.")
+
+def bloquear_conexion_adaptador_principal(local_ip):
+    """
+    Bloquea el tráfico saliente en el puerto 5222 del adaptador principal usando su IP local.
+    Esto fuerza que las conexiones hacia WOT se establezcan desde el adaptador secundario.
+    """
+    try:
+        cmd = f'netsh advfirewall firewall add rule name="Bloqueo_WOT" dir=out localip={local_ip} protocol=TCP localport=5222 action=block'
+        subprocess.run(cmd, shell=True, check=True)
+        print(f"✅ Se bloqueó el puerto 5222 para la IP {local_ip} en el adaptador principal.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error al aplicar la regla de firewall: {e}")
+
+def desbloquear_conexion_adaptador_principal():
+    """Elimina la regla de firewall para el puerto 5222."""
+    try:
+        cmd = 'netsh advfirewall firewall delete rule name="Bloqueo_WOT"'
+        subprocess.run(cmd, shell=True, check=True)
+        print("✅ Regla de firewall eliminada.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error al eliminar la regla de firewall: {e}")
+
+
+def main():
+    adaptadores = obtener_adaptadores()
+    if not adaptadores:
+        print("❌ No se encontraron adaptadores válidos")
+        return
+
+    try:
+        # Selección del adaptador principal para Internet
+        seleccion_principal = int(
+            input("\n🔸 Selecciona el adaptador principal (para Internet, por número): ").strip()) - 1
+        idx_principal, nombre_principal, ip_principal, gateway_principal, mascara_principal = adaptadores[
+            seleccion_principal]
+        if not gateway_principal:
+            print(f"❌ El adaptador {nombre_principal} no tiene gateway configurado")
+            return
+        print(f"\n🌐 Adaptador principal: {nombre_principal} - IP: {ip_principal} | Gateway: {gateway_principal}")
+
+
+        # Selección del adaptador para WOT
+        seleccion_wot = int(input("\n🔸 Selecciona el adaptador para WOT (por número): ").strip()) - 1
+        idx_wot, nombre_wot, ip_wot, gateway_wot, mascara_wot = adaptadores[seleccion_wot]
+        if not gateway_wot:
+            print(f"❌ El adaptador {nombre_wot} no tiene gateway configurado")
+            return
+        print(f"\n🌐 Adaptador para WOT: {nombre_wot} - IP: {ip_wot} | Gateway: {gateway_wot}")
+
+    except (ValueError, IndexError):
+        print("❌ Selección inválida")
+        return
+
+        # Bloquear el tráfico del puerto 5222 en el adaptador principal (usando su IP local)
+    if ip_principal:
+        bloquear_conexion_adaptador_principal(ip_principal)
+    else:
+        print("❌ No se pudo bloquear el tráfico, no se obtuvo la IP del adaptador principal.")
+
+    # Para el adaptador WOT:
+    # 1. Reseteamos a DHCP para borrar la IP fija anterior.
+    print(f"\n🔄 Reseteando {nombre_wot} a DHCP para obtener los valores predeterminados...")
+    resetear_a_dhcp(nombre_wot)
+    print("⏳ Esperando que se renueve la configuración (10 segundos)...")
+    time.sleep(10)
+
+    # 2. Volvemos a leer la configuración actualizada del adaptador WOT.
+    ip_wot_nueva, gateway_wot_nueva, mascara_wot_nueva = obtener_detalles_adaptador(nombre_wot)
+    if not gateway_wot_nueva:
+        print(f"❌ No se pudo obtener el gateway actualizado para {nombre_wot}")
+        return
+    print(f"\n🌐 Nueva configuración en {nombre_wot}: Gateway: {gateway_wot_nueva}, Máscara: {mascara_wot_nueva}")
+
+    # 3. Calcular IP estática usando los tres primeros octetos del gateway y asignando .100
+    octetos = gateway_wot_nueva.split('.')
+    if len(octetos) == 4:
+        ip_estatica = f"{octetos[0]}.{octetos[1]}.{octetos[2]}.100"
+    else:
+        ip_estatica = "192.168.0.100"
+    print(f"\n🔄 Se asignará la IP estática {ip_estatica} a {nombre_wot}")
+
+    # 4. Configurar IP estática en el adaptador para WOT con DNS 8.8.8.8 y métrica 50.
+    configurar_ip_estatica(nombre_wot, ip_estatica, mascara_wot_nueva, gateway_wot_nueva, "8.8.8.8")
+    ip_wot = ip_estatica
+
+    # 5. Asignar la métrica 50 al adaptador para WOT (aunque ya la usamos al asignar IP estática, aquí se refuerza)
+    asignar_metrica(nombre_wot, 50)
+
+    # 6. Eliminar cualquier ruta existente para el rango de WOT en el sistema (para "cortar" el tráfico desde el adaptador principal)
+    eliminar_ruta("92.223.0.0")
+
+    ip_destino_wot = "92.223.0.0"  # Asegúrate de que esta IP sea la correcta para WOT
+    bloquear_conexion_adaptador_principal2(ip_destino_wot, gateway_wot_nueva)
+
+    try:
+        # Esperar hasta que se inicie el juego/launcher
+        while not (verificar_proceso('wgc.exe') or verificar_proceso('WorldOfTanks.exe')):
+            print("⏳ Esperando ejecución de WGC.exe o WorldOfTanks.exe...")
+            time.sleep(5)
+
+        # Agregar la ruta específica para WOT (redirige tráfico hacia 92.223.0.0/16) a través del gateway del adaptador WOT.
+        modificar_ruta('ADD', gateway_wot_nueva, "92.223.0.0")
+        print("✅ Ruta para WOT agregada. El tráfico de WOT se redirige a través del adaptador seleccionado.")
+        print("\n🔍 Monitoreando actividad... (Ctrl+C para salir)")
+        monitorear_conexion(gateway_wot_nueva, ip_wot, ip_principal)
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error en configuración de red: {e}")
+    finally:
+        modificar_ruta('DELETE', gateway_wot_nueva, "92.223.0.0")
+        desbloquear_conexion_adaptador_principal()
+
+
+if __name__ == "__main__":
+    main()
