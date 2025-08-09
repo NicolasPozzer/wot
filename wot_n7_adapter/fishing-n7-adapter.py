@@ -6,14 +6,15 @@ import keyboard
 
 interrumpir = False  # bandera global
 
-ip_destino_wot = "92.223.0.0"  # Asegúrate de que esta IP sea la correcta para WOT
-puerto = 5222
+ip_destino_wot = "192.40.222.93"  # Servidor de Fishing Planet
+puerto = 4530                     # Puerto usado por Fishing Planet
+
 static_ip = "192.168.0.100"
 
-proceso = 'wgc.exe'
-proceso1 = 'WorldOfTanks.exe'
+proceso = 'fsdfsd.exe'
+proceso1 = 'FishingPlanet.exe'
 
-juego_name = 'WOTrule' # esto es solo para decoracion
+juego_name = 'FishingPlanetrule' # esto es solo para decoracion
 
 
 
