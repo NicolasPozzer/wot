@@ -206,12 +206,24 @@ def monitorearre_conexion(gateway_wot, ip_wot, ip_excluir):
     except KeyboardInterrupt:
         print("\n🔧 Monitoreo detenido manualmente.")
 
+import threading
+
+def esperar_tecla():
+    global interrumpir
+    while not interrumpir:
+        tecla = input().strip().lower()
+        if tecla == "z":
+            print("\n🟥 Tecla `z` detectada desde la terminal. Deteniendo monitoreo...")
+            interrumpir = True
+
 def monitorear_conexion(gateway_wot, ip_wot, ip_excluir):
-    """Monitorea la conexión asegurando que se use la IP correcta para WOT y excluyendo la IP incorrecta."""
     global interrumpir
     interrumpir = False
 
-    print("\n🟡 Presioná `z` para detener la monitorización y reiniciar.")
+    print("\n🟡 Escribe `z` y presiona Enter para detener la monitorización.")
+
+    # Hilo para leer la tecla en la terminal
+    threading.Thread(target=esperar_tecla, daemon=True).start()
 
     try:
         while not interrumpir:
@@ -224,18 +236,16 @@ def monitorear_conexion(gateway_wot, ip_wot, ip_excluir):
 
                 if ip_local == ip_wot:
                     print(f"{VERDE}✅ WOT está conectado correctamente con la IP adecuada.{RESET}")
-                    print("\n🟥 Tecla `z` para parar conexion")
+                    print("\n🟥 Tecla `z` y Enter Rapido! Si desea parar la conexion")
                 else:
                     print(f"{ROJO}⚠️ Advertencia: {juego_name} está usando otra IP ({ip_local}).{RESET}")
+                    print("\n🟥 Tecla `z` y Enter Rapido! Si desea parar la conexion")
             else:
                 print(f"{AMARILLO}⚠️ No se encontró una conexión activa en el puerto {puerto}.{RESET}")
-                print("\n🟥 Tecla `z` para parar conexion")
+                print("\n🟥 Tecla `z` y Enter Rapido! Si desea parar la conexion")
 
-            time.sleep(1)
+            time.sleep(5)
 
-            if keyboard.is_pressed('z'):
-                print("\n🟥 Tecla `z` detectado. Deteniendo monitoreo...")
-                interrumpir = True
     except Exception as e:
         print(f"⚠️ Error durante la monitorización: {str(e)}")
 
