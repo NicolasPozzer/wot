@@ -224,10 +224,12 @@ def monitorear_conexion(gateway_wot, ip_wot, ip_excluir):
 
                 if ip_local == ip_wot:
                     print(f"{VERDE}✅ WOT está conectado correctamente con la IP adecuada.{RESET}")
+                    print("\n🟥 Tecla `z` para parar conexion")
                 else:
                     print(f"{ROJO}⚠️ Advertencia: {juego_name} está usando otra IP ({ip_local}).{RESET}")
             else:
                 print(f"{AMARILLO}⚠️ No se encontró una conexión activa en el puerto {puerto}.{RESET}")
+                print("\n🟥 Tecla `z` para parar conexion")
 
             time.sleep(1)
 
