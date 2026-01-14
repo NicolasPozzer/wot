@@ -200,7 +200,7 @@ def monitorearre_conexion(gateway_wot, ip_wot, ip_excluir):
                 else:
                     print(f"{ROJO}⚠️ Advertencia: WOT está usando otra IP ({ip_local}).{RESET}")
             else:
-                print(f"{AMARILLO}⚠️ No se encontró una conexión activa en el puerto {puerto}.{RESET}")
+                print(f"{AMARILLO}⚠️ No se encontró una conexión activa en el puerto {puerto}. Revisa si ya estas en el Garage de WOT.{RESET}")
 
             time.sleep(5)
     except KeyboardInterrupt:
@@ -245,7 +245,7 @@ def monitorear_conexion(gateway_wot, ip_wot, ip_excluir):
 
                     print("\n🟥 Tecla `z` y Enter Rapido! Si desea parar la conexion")
             else:
-                print(f"{AMARILLO}⚠️ No se encontró una conexión activa en el puerto {puerto}.{RESET}")
+                print(f"{AMARILLO}⚠️ No se encontró una conexión activa en el puerto {puerto}. Revisa si ya estas en el Garage de WOT.{RESET}")
                 print("\n🟥 Tecla `z` y Enter Rapido! Si desea parar la conexion")
 
             time.sleep(5)
@@ -344,6 +344,7 @@ def main():
     if es_iphone:
         print("\n iPhone detectado → modo DHCP puro (SIN IP estática)")
         ip_wot = ip_wot_nueva
+        time.sleep(2)
 
     else:
         print("\n Android detectado → modo IP estática")
@@ -362,6 +363,7 @@ def main():
 
         asignar_metrica(nombre_wot, 50)
         ip_wot = ip_estatica
+        time.sleep(2)
 
     # 🚧 Rutas
     eliminar_ruta(ip_destino_wot)
