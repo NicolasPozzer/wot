@@ -234,11 +234,15 @@ def monitorear_conexion(gateway_wot, ip_wot, ip_excluir):
                 print(f"🔍 IP local conectada al servidor de {juego_name}: {ip_local}")
                 print(f"🔍 IP Red sin Microcortes! (la que deberías usar) {ip_wot}")
 
-                if ip_local == ip_wot:
+                if es_tethering_iphone(ip_wot):
+                    print(f"{VERDE}✅ WOT usando tethering iPhone correctamente.{RESET}")
+                    print("\n🟥 Tecla `z` y Enter Rapido! Si desea parar la conexion")
+                elif ip_local == ip_wot:
                     print(f"{VERDE}✅ WOT está conectado correctamente con la IP adecuada.{RESET}")
                     print("\n🟥 Tecla `z` y Enter Rapido! Si desea parar la conexion")
                 else:
                     print(f"{ROJO}⚠️ Advertencia: {juego_name} está usando otra IP ({ip_local}).{RESET}")
+
                     print("\n🟥 Tecla `z` y Enter Rapido! Si desea parar la conexion")
             else:
                 print(f"{AMARILLO}⚠️ No se encontró una conexión activa en el puerto {puerto}.{RESET}")
@@ -271,6 +275,9 @@ def desbloquear_conexion_adaptador_principal():
     except subprocess.CalledProcessError as e:
         print(f"❌ Error al eliminar la regla de firewall: {e}")
 
+def es_tethering_iphone(ip):
+    return ip is not None and ip.startswith("172.20.10.")
+
 
 def main():
     adaptadores = obtener_adaptadores()
@@ -279,83 +286,103 @@ def main():
         return
 
     try:
-        # Selección del adaptador principal para Internet
+        # Adaptador principal
         seleccion_principal = int(
-            input("\n🔸 Selecciona el adaptador principal (para Internet, youtube, twitch, etc), por número: ").strip()) - 1
-        idx_principal, nombre_principal, ip_principal, gateway_principal, mascara_principal = adaptadores[
-            seleccion_principal]
+            input("\nSelecciona el adaptador principal (para Internet, youtube, twitch, etc), por número: ").strip()
+        ) - 1
+
+        idx_principal, nombre_principal, ip_principal, gateway_principal, mascara_principal = adaptadores[seleccion_principal]
+
         if not gateway_principal:
-            print(f"❌ El adaptador {nombre_principal} no tiene gateway configurado")
+            print(f"❌ El adaptador {nombre_principal} no tiene gateway")
             return
-        print(f"\n🌐 Adaptador principal: {nombre_principal} - IP: {ip_principal} | Gateway: {gateway_principal}")
 
+        print(f"\n Adaptador principal: {nombre_principal} | IP: {ip_principal} | GW: {gateway_principal}")
 
-        # Selección del adaptador para WOT
-        seleccion_wot = int(input(f"\n🔸 Selecciona el adaptador para {juego_name} (por número): ").strip()) - 1
+        # Adaptador WOT
+        seleccion_wot = int(
+            input(f"\nSelecciona el adaptador para {juego_name}, por numero: ").strip()
+        ) - 1
+
         idx_wot, nombre_wot, ip_wot, gateway_wot, mascara_wot = adaptadores[seleccion_wot]
+
         if not gateway_wot:
-            print(f"❌ El adaptador {nombre_wot} no tiene gateway configurado")
+            print(f"❌ El adaptador {nombre_wot} no tiene gateway")
             return
-        print(f"\n🌐 Adaptador para WOT: {nombre_wot} - IP: {ip_wot} | Gateway: {gateway_wot}")
+
+        print(f"\n🎮 Adaptador WOT: {nombre_wot} | IP: {ip_wot} | GW: {gateway_wot}")
 
     except (ValueError, IndexError):
         print("❌ Selección inválida")
         return
 
-        # Bloquear el tráfico del puerto 5222 en el adaptador principal (usando su IP local)
+    #  Bloqueo del adaptador principal
     if ip_principal:
         bloquear_conexion_adaptador_principal(ip_principal)
     else:
-        print("❌ No se pudo bloquear el tráfico, no se obtuvo la IP del adaptador principal.")
+        print("❌ No se pudo bloquear el adaptador principal")
+        return
 
-    # Para el adaptador WOT:
-    # 1. Reseteamos a DHCP para borrar la IP fija anterior.
-    print(f"\n🔄 Reseteando {nombre_wot} a DHCP para obtener los valores predeterminados...")
+    # 🔄 Reset DHCP en adaptador WOT
+    print(f"\n Reseteando {nombre_wot} a DHCP...")
     resetear_a_dhcp(nombre_wot)
-    print("⏳ Esperando que se renueve la configuración (10 segundos)...")
-    time.sleep(10)
+    time.sleep(8)
 
-    # 2. Volvemos a leer la configuración actualizada del adaptador WOT.
     ip_wot_nueva, gateway_wot_nueva, mascara_wot_nueva = obtener_detalles_adaptador(nombre_wot)
     if not gateway_wot_nueva:
-        print(f"❌ No se pudo obtener el gateway actualizado para {nombre_wot}")
+        print(f"❌ No se pudo obtener gateway para {nombre_wot}")
         return
-    print(f"\n🌐 Nueva configuración en {nombre_wot}: Gateway: {gateway_wot_nueva}, Máscara: {mascara_wot_nueva}")
 
-    # 3. Calcular IP estática usando los tres primeros octetos del gateway y asignando .100
-    octetos = gateway_wot_nueva.split('.')
-    if len(octetos) == 4:
-        ip_estatica = f"{octetos[0]}.{octetos[1]}.{octetos[2]}.100"
+    print(f"\n🌐 Configuración WOT actualizada:")
+    print(f"   IP: {ip_wot_nueva}")
+    print(f"   Gateway: {gateway_wot_nueva}")
+    print(f"   Máscara: {mascara_wot_nueva}")
+
+    #  Detectar iPhone
+    es_iphone = es_tethering_iphone(ip_wot_nueva)
+
+    if es_iphone:
+        print("\n iPhone detectado → modo DHCP puro (SIN IP estática)")
+        ip_wot = ip_wot_nueva
+
     else:
-        ip_estatica = static_ip
-    print(f"\n🔄 Se asignará la IP estática {ip_estatica} a {nombre_wot}")
+        print("\n Android detectado → modo IP estática")
 
-    # 4. Configurar IP estática en el adaptador para WOT con DNS 8.8.8.8 y métrica 50.
-    configurar_ip_estatica(nombre_wot, ip_estatica, mascara_wot_nueva, gateway_wot_nueva, "8.8.8.8")
-    ip_wot = ip_estatica
+        octetos = gateway_wot_nueva.split('.')
+        ip_estatica = f"{octetos[0]}.{octetos[1]}.{octetos[2]}.100"
 
-    # 5. Asignar la métrica 50 al adaptador para WOT (aunque ya la usamos al asignar IP estática, aquí se refuerza)
-    asignar_metrica(nombre_wot, 50)
+        print(f"🔄 Asignando IP estática {ip_estatica}")
+        configurar_ip_estatica(
+            nombre_wot,
+            ip_estatica,
+            mascara_wot_nueva,
+            gateway_wot_nueva,
+            "8.8.8.8"
+        )
 
-    # 6. Eliminar cualquier ruta existente para el rango de WOT en el sistema (para "cortar" el tráfico desde el adaptador principal)
+        asignar_metrica(nombre_wot, 50)
+        ip_wot = ip_estatica
+
+    # 🚧 Rutas
     eliminar_ruta(ip_destino_wot)
-
-
     bloquear_conexion_adaptador_principal2(ip_destino_wot, gateway_wot_nueva)
 
     try:
-        # Esperar hasta que se inicie el juego/launcher
+        # ⏳ Esperar WOT
         while not (verificar_proceso(proceso) or verificar_proceso(proceso1)):
-            print(f"⏳ Esperando ejecución de {proceso} o {proceso1}...")
+            print(f"⏳ Esperando {proceso} / {proceso1}...")
             time.sleep(5)
 
-        # Agregar la ruta específica para WOT (redirige tráfico hacia 92.223.0.0/16) a través del gateway del adaptador WOT.
         modificar_ruta('ADD', gateway_wot_nueva, ip_destino_wot)
-        print(f"✅ Ruta para {juego_name} agregada. El tráfico de {juego_name} se redirige a través del adaptador seleccionado.")
-        print("\n🔍 Monitoreando actividad... (Ctrl+C para salir)")
+
+        print(f"\n✅ Ruta para {juego_name} aplicada correctamente")
+        print("🔍 Monitoreando conexión...\n")
+
         monitorear_conexion(gateway_wot_nueva, ip_wot, ip_principal)
+
     except subprocess.CalledProcessError as e:
-        print(f"❌ Error en configuración de red: {e}")
+        print(f"❌ Error de red: {e}")
+
     finally:
         modificar_ruta('DELETE', gateway_wot_nueva, ip_destino_wot)
         desbloquear_conexion_adaptador_principal()
